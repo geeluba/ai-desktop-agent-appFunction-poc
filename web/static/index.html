@@ -5,49 +5,344 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Projector Agent</title>
   <style>
-    :root { color-scheme: light dark; --bg:#0e1117; --fg:#e6edf3; --muted:#7d8590; --card:#161b22; --accent:#2f81f7; --ok:#2da44e; --err:#f85149; }
+    :root {
+      color-scheme: light dark;
+      --bg: #0e1117;
+      --fg: #e6edf3;
+      --muted: #7d8590;
+      --card: #161b22;
+      --card-2: #21262d;
+      --accent: #2f81f7;
+      --accent-fg: #ffffff;
+      --ok: #2da44e;
+      --err: #f85149;
+      --warn: #d29922;
+      --radius-lg: 18px;
+      --radius-sm: 6px;
+    }
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; background: var(--bg); color: var(--fg); }
-    .app { max-width: 720px; margin: 0 auto; padding: 24px 16px; min-height: 100vh; display: flex; flex-direction: column; }
-    header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 16px; }
-    h1 { font-size: 18px; margin: 0; font-weight: 600; }
-    .hint { color: var(--muted); font-size: 12px; }
-    .log { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-bottom: 12px; }
-    .msg { background: var(--card); border-radius: 10px; padding: 10px 12px; font-size: 14px; line-height: 1.4; }
-    .msg .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
-    .msg.user { border-left: 3px solid var(--accent); }
-    .msg.intent { border-left: 3px solid #d29922; }
-    .msg.ok { border-left: 3px solid var(--ok); }
-    .msg.err { border-left: 3px solid var(--err); }
-    .msg pre { margin: 0; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; color: var(--muted); }
-    form { display: flex; gap: 8px; padding-top: 8px; border-top: 1px solid var(--card); }
-    #text { flex: 1; background: var(--card); color: var(--fg); border: 1px solid transparent; border-radius: 8px; padding: 10px 12px; font-size: 14px; outline: none; }
-    #text:focus { border-color: var(--accent); }
-    button { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 0 16px; font-size: 14px; font-weight: 500; cursor: pointer; }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
-    #mic { background: var(--card); color: var(--fg); padding: 0 12px; font-size: 16px; }
-    #mic.listening { background: var(--err); color: #fff; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      overflow: hidden;
+    }
+    .app {
+      max-width: 760px;
+      margin: 0 auto;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding: 0 16px;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 4px;
+      border-bottom: 1px solid var(--card);
+    }
+    .avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #2f81f7, #6e40c9);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+    .header-text { flex: 1; min-width: 0; }
+    h1 { font-size: 15px; margin: 0; font-weight: 600; }
+    .status {
+      font-size: 12px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 2px;
+    }
+    .status::before {
+      content: '';
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--ok);
+      box-shadow: 0 0 6px var(--ok);
+    }
+
+    /* Scroll area */
+    .log {
+      flex: 1;
+      overflow-y: auto;
+      padding: 18px 4px 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      scroll-behavior: smooth;
+    }
+    .log::-webkit-scrollbar { width: 8px; }
+    .log::-webkit-scrollbar-thumb { background: var(--card-2); border-radius: 4px; }
+
+    /* Message row */
+    .row {
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+      margin-top: 10px;
+      animation: pop 0.18s ease-out;
+    }
+    .row.you { justify-content: flex-end; }
+    .row.grouped { margin-top: 2px; }
+    .row.grouped .row-avatar { visibility: hidden; }
+
+    .row-avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      background: var(--card-2);
+    }
+    .row-avatar.agent { background: linear-gradient(135deg, #2f81f7, #6e40c9); }
+
+    .stack {
+      display: flex;
+      flex-direction: column;
+      max-width: 75%;
+      min-width: 0;
+    }
+    .bubble {
+      padding: 10px 14px;
+      border-radius: var(--radius-lg);
+      font-size: 14px;
+      line-height: 1.45;
+      word-wrap: break-word;
+      position: relative;
+    }
+    .row.you .bubble {
+      background: var(--accent);
+      color: var(--accent-fg);
+      border-bottom-right-radius: var(--radius-sm);
+    }
+    .row.agent .bubble {
+      background: var(--card-2);
+      color: var(--fg);
+      border-bottom-left-radius: var(--radius-sm);
+    }
+
+    /* Intent tag inside agent bubble */
+    .intent-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--muted);
+      background: rgba(125, 133, 144, 0.12);
+      padding: 3px 8px;
+      border-radius: 10px;
+      margin-bottom: 8px;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      cursor: help;
+    }
+    .intent-tag.ok { color: var(--ok); background: rgba(45, 164, 78, 0.12); }
+    .intent-tag.err { color: var(--err); background: rgba(248, 81, 73, 0.12); }
+    .intent-tag.warn { color: var(--warn); background: rgba(210, 153, 34, 0.12); }
+    .intent-tag .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+    .summary { display: block; }
+    .summary.err { color: #ffb4ad; }
+
+    /* Timestamp */
+    .ts {
+      font-size: 10px;
+      color: var(--muted);
+      margin: 4px 8px 0;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+    .row:hover .ts { opacity: 1; }
+
+    /* Typing indicator */
+    .typing {
+      display: inline-flex;
+      gap: 4px;
+      padding: 4px 0;
+    }
+    .typing span {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--muted);
+      animation: blink 1.2s infinite ease-in-out;
+    }
+    .typing span:nth-child(2) { animation-delay: 0.15s; }
+    .typing span:nth-child(3) { animation-delay: 0.3s; }
+
+    @keyframes blink {
+      0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+      30% { opacity: 1; transform: translateY(-2px); }
+    }
+    @keyframes pop {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Welcome / examples */
+    .welcome {
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+      margin: 32px 0 16px;
+    }
+    .welcome h2 {
+      font-size: 16px;
+      color: var(--fg);
+      margin: 0 0 6px;
+      font-weight: 600;
+    }
+
+    /* Composer */
+    .composer-wrap {
+      padding: 12px 0 16px;
+      border-top: 1px solid var(--card);
+      background: var(--bg);
+    }
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+    .chip {
+      font-size: 12px;
+      color: var(--muted);
+      background: var(--card);
+      border: 1px solid transparent;
+      border-radius: 14px;
+      padding: 5px 11px;
+      cursor: pointer;
+      transition: all 0.12s;
+      white-space: nowrap;
+    }
+    .chip:hover {
+      color: var(--fg);
+      border-color: var(--accent);
+      background: var(--card-2);
+    }
+    form {
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+    }
+    .input-box {
+      flex: 1;
+      background: var(--card);
+      border: 1px solid var(--card-2);
+      border-radius: 22px;
+      display: flex;
+      align-items: flex-end;
+      padding: 6px 6px 6px 14px;
+      transition: border-color 0.12s;
+    }
+    .input-box:focus-within { border-color: var(--accent); }
+    #text {
+      flex: 1;
+      background: transparent;
+      color: var(--fg);
+      border: 0;
+      padding: 8px 0;
+      font-size: 14px;
+      font-family: inherit;
+      outline: none;
+      resize: none;
+      max-height: 120px;
+      line-height: 1.4;
+    }
+    .icon-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      flex-shrink: 0;
+      transition: all 0.12s;
+    }
+    .icon-btn:hover { background: var(--card-2); color: var(--fg); }
+    .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    #mic.listening {
+      background: var(--err);
+      color: #fff;
+      animation: pulse 1.2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(248, 81, 73, 0.6); }
+      50% { box-shadow: 0 0 0 6px rgba(248, 81, 73, 0); }
+    }
+    #send {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border: 0;
+      background: var(--accent);
+      color: #fff;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      flex-shrink: 0;
+      transition: transform 0.1s, opacity 0.1s;
+    }
+    #send:hover:not(:disabled) { transform: scale(1.05); }
+    #send:disabled { opacity: 0.4; cursor: not-allowed; }
   </style>
 </head>
 <body>
   <div class="app">
     <header>
-      <h1>Projector Agent</h1>
-      <div class="hint">Claude → ADB → AppFunctions</div>
+      <div class="avatar">P</div>
+      <div class="header-text">
+        <h1>Projector Agent</h1>
+        <div class="status">Connected · Ollama → ADB → AppFunctions</div>
+      </div>
     </header>
 
     <div id="log" class="log">
-      <div class="msg">
-        <div class="label">Examples</div>
-        Pair pro-a and pro-b and play aaa.mp4 · Calibrate Proj-A and Proj-B in landscape · Confirm the calibration
+      <div class="welcome">
+        <h2>How can I help you today?</h2>
+        <div>Tell me what to do with your projectors.</div>
       </div>
     </div>
 
-    <form id="form">
-      <button type="button" id="mic" title="Voice input">🎤</button>
-      <input id="text" autofocus autocomplete="off" placeholder="Speak or type a command…">
-      <button type="submit" id="send">Send</button>
-    </form>
+    <div class="composer-wrap">
+      <div class="chips" id="chips">
+        <button class="chip" data-text="Pair pro-a and pro-b and play apink.mp4">Pair &amp; play apink.mp4</button>
+        <button class="chip" data-text="Calibrate in landscape">Calibrate landscape</button>
+        <button class="chip" data-text="Standby please">Standby</button>
+        <button class="chip" data-text="Stop blending">End session</button>
+      </div>
+      <form id="form">
+        <button type="button" id="mic" class="icon-btn" title="Voice input">🎤</button>
+        <div class="input-box">
+          <textarea id="text" rows="1" autofocus autocomplete="off"
+            placeholder="Message the projector agent…"></textarea>
+        </div>
+        <button type="submit" id="send" title="Send">➤</button>
+      </form>
+    </div>
   </div>
 
   <script>
@@ -56,23 +351,147 @@
     const input = document.getElementById('text');
     const send = document.getElementById('send');
     const mic = document.getElementById('mic');
+    const chips = document.getElementById('chips');
 
-    function bubble(label, body, klass) {
-      const el = document.createElement('div');
-      el.className = `msg ${klass}`;
-      const lbl = document.createElement('div');
-      lbl.className = 'label';
-      lbl.textContent = label;
-      el.appendChild(lbl);
-      if (typeof body === 'string') {
-        el.appendChild(document.createTextNode(body));
-      } else {
-        const pre = document.createElement('pre');
-        pre.textContent = JSON.stringify(body, null, 2);
-        el.appendChild(pre);
+    let lastSender = null;
+
+    function fmtTime(d = new Date()) {
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function scrollDown() {
+      requestAnimationFrame(() => { log.scrollTop = log.scrollHeight; });
+    }
+
+    function addUserBubble(text) {
+      const grouped = lastSender === 'you';
+      const row = document.createElement('div');
+      row.className = `row you${grouped ? ' grouped' : ''}`;
+      row.innerHTML = `
+        <div class="stack">
+          <div class="bubble">${escapeHtml(text)}</div>
+          <div class="ts" style="text-align:right">${fmtTime()}</div>
+        </div>
+        <div class="row-avatar">🧑</div>
+      `;
+      log.appendChild(row);
+      lastSender = 'you';
+      scrollDown();
+    }
+
+    function addAgentBubble(contentNode) {
+      const grouped = lastSender === 'agent';
+      const row = document.createElement('div');
+      row.className = `row agent${grouped ? ' grouped' : ''}`;
+      const avatar = document.createElement('div');
+      avatar.className = 'row-avatar agent';
+      avatar.textContent = '🤖';
+      const wrap = document.createElement('div');
+      wrap.className = 'stack';
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+      bubble.appendChild(contentNode);
+      const ts = document.createElement('div');
+      ts.className = 'ts';
+      ts.textContent = fmtTime();
+      wrap.appendChild(bubble);
+      wrap.appendChild(ts);
+      row.appendChild(avatar);
+      row.appendChild(wrap);
+      log.appendChild(row);
+      lastSender = 'agent';
+      scrollDown();
+      return { row, bubble };
+    }
+
+    function addTyping() {
+      const node = document.createElement('div');
+      node.className = 'typing';
+      node.innerHTML = '<span></span><span></span><span></span>';
+      const { row } = addAgentBubble(node);
+      // typing indicators shouldn't anchor "grouping" — reset so the real
+      // reply still gets its own avatar if needed.
+      lastSender = null;
+      return row;
+    }
+
+    function buildAgentReply({ intent, ok, summary, error }) {
+      const frag = document.createDocumentFragment();
+      if (error) {
+        const tag = document.createElement('div');
+        tag.className = 'intent-tag err';
+        tag.innerHTML = '<span class="dot"></span>intent error';
+        frag.appendChild(tag);
+        const body = document.createElement('div');
+        body.className = 'summary err';
+        body.textContent = error;
+        frag.appendChild(body);
+        return frag;
       }
-      log.appendChild(el);
-      log.scrollTop = log.scrollHeight;
+      const tag = document.createElement('div');
+      tag.className = `intent-tag ${ok ? 'ok' : 'err'}`;
+      tag.innerHTML = `<span class="dot"></span>${intent.name}`;
+      tag.title = JSON.stringify(intent.args, null, 2);
+      frag.appendChild(tag);
+      const body = document.createElement('div');
+      body.className = `summary${ok ? '' : ' err'}`;
+      body.textContent = summary;
+      frag.appendChild(body);
+      return frag;
+    }
+
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[c]));
+    }
+
+    function autosize() {
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+    }
+    input.addEventListener('input', autosize);
+
+    // Submit on Enter, newline on Shift+Enter
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        form.requestSubmit();
+      }
+    });
+
+    chips.addEventListener('click', (e) => {
+      const btn = e.target.closest('.chip');
+      if (!btn) return;
+      input.value = btn.dataset.text;
+      autosize();
+      input.focus();
+    });
+
+    async function sendMessage(text) {
+      addUserBubble(text);
+      const typingRow = addTyping();
+      send.disabled = true;
+      try {
+        const resp = await fetch('/invoke', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text }),
+        });
+        const data = await resp.json();
+        typingRow.remove();
+        if (!resp.ok) {
+          addAgentBubble(buildAgentReply({ error: data.error || `HTTP ${resp.status}` }));
+        } else {
+          addAgentBubble(buildAgentReply(data));
+        }
+      } catch (err) {
+        typingRow.remove();
+        addAgentBubble(buildAgentReply({ error: String(err) }));
+      } finally {
+        send.disabled = false;
+        input.focus();
+      }
     }
 
     form.addEventListener('submit', async (e) => {
@@ -80,29 +499,8 @@
       const text = input.value.trim();
       if (!text) return;
       input.value = '';
-      send.disabled = true;
-      bubble('you', text, 'user');
-      try {
-        const resp = await fetch('/invoke', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({text}),
-        });
-        const data = await resp.json();
-        if (!resp.ok) {
-          bubble('error', data.error || `${resp.status}`, 'err');
-        } else {
-          bubble('intent', data.intent, 'intent');
-          bubble(data.ok ? 'projector' : 'error',
-                 data.summary,
-                 data.ok ? 'ok' : 'err');
-        }
-      } catch (err) {
-        bubble('error', String(err), 'err');
-      } finally {
-        send.disabled = false;
-        input.focus();
-      }
+      autosize();
+      await sendMessage(text);
     });
 
     // Browser voice input (Chrome / Edge). Falls back silently if unsupported.
@@ -123,6 +521,7 @@
       recog.addEventListener('result', (e) => {
         const text = e.results[0][0].transcript;
         input.value = text;
+        autosize();
         mic.classList.remove('listening');
         form.requestSubmit();
       });
