@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Projector Agent</title>
+  <style>
+    :root { color-scheme: light dark; --bg:#0e1117; --fg:#e6edf3; --muted:#7d8590; --card:#161b22; --accent:#2f81f7; --ok:#2da44e; --err:#f85149; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; background: var(--bg); color: var(--fg); }
+    .app { max-width: 720px; margin: 0 auto; padding: 24px 16px; min-height: 100vh; display: flex; flex-direction: column; }
+    header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 16px; }
+    h1 { font-size: 18px; margin: 0; font-weight: 600; }
+    .hint { color: var(--muted); font-size: 12px; }
+    .log { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-bottom: 12px; }
+    .msg { background: var(--card); border-radius: 10px; padding: 10px 12px; font-size: 14px; line-height: 1.4; }
+    .msg .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+    .msg.user { border-left: 3px solid var(--accent); }
+    .msg.intent { border-left: 3px solid #d29922; }
+    .msg.ok { border-left: 3px solid var(--ok); }
+    .msg.err { border-left: 3px solid var(--err); }
+    .msg pre { margin: 0; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; color: var(--muted); }
+    form { display: flex; gap: 8px; padding-top: 8px; border-top: 1px solid var(--card); }
+    #text { flex: 1; background: var(--card); color: var(--fg); border: 1px solid transparent; border-radius: 8px; padding: 10px 12px; font-size: 14px; outline: none; }
+    #text:focus { border-color: var(--accent); }
+    button { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 0 16px; font-size: 14px; font-weight: 500; cursor: pointer; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    #mic { background: var(--card); color: var(--fg); padding: 0 12px; font-size: 16px; }
+    #mic.listening { background: var(--err); color: #fff; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>Projector Agent</h1>
+      <div class="hint">Claude → ADB → AppFunctions</div>
+    </header>
+
+    <div id="log" class="log">
+      <div class="msg">
+        <div class="label">Examples</div>
+        Pair pro-a and pro-b and play aaa.mp4 · Calibrate Proj-A and Proj-B in landscape · Confirm the calibration
+      </div>
+    </div>
+
+    <form id="form">
+      <button type="button" id="mic" title="Voice input">🎤</button>
+      <input id="text" autofocus autocomplete="off" placeholder="Speak or type a command…">
+      <button type="submit" id="send">Send</button>
+    </form>
+  </div>
+
+  <script>
+    const log = document.getElementById('log');
+    const form = document.getElementById('form');
+    const input = document.getElementById('text');
+    const send = document.getElementById('send');
+    const mic = document.getElementById('mic');
+
+    function bubble(label, body, klass) {
+      const el = document.createElement('div');
+      el.className = `msg ${klass}`;
+      const lbl = document.createElement('div');
+      lbl.className = 'label';
+      lbl.textContent = label;
+      el.appendChild(lbl);
+      if (typeof body === 'string') {
+        el.appendChild(document.createTextNode(body));
+      } else {
+        const pre = document.createElement('pre');
+        pre.textContent = JSON.stringify(body, null, 2);
+        el.appendChild(pre);
+      }
+      log.appendChild(el);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = '';
+      send.disabled = true;
+      bubble('you', text, 'user');
+      try {
+        const resp = await fetch('/invoke', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({text}),
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          bubble('error', data.error || `${resp.status}`, 'err');
+        } else {
+          bubble('intent', data.intent, 'intent');
+          bubble(data.ok ? 'projector' : 'error',
+                 data.summary,
+                 data.ok ? 'ok' : 'err');
+        }
+      } catch (err) {
+        bubble('error', String(err), 'err');
+      } finally {
+        send.disabled = false;
+        input.focus();
+      }
+    });
+
+    // Browser voice input (Chrome / Edge). Falls back silently if unsupported.
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SR) {
+      const recog = new SR();
+      recog.lang = 'en-US';
+      recog.interimResults = false;
+      recog.maxAlternatives = 1;
+      mic.addEventListener('click', () => {
+        if (mic.classList.contains('listening')) {
+          recog.stop();
+        } else {
+          mic.classList.add('listening');
+          recog.start();
+        }
+      });
+      recog.addEventListener('result', (e) => {
+        const text = e.results[0][0].transcript;
+        input.value = text;
+        mic.classList.remove('listening');
+        form.requestSubmit();
+      });
+      recog.addEventListener('end', () => mic.classList.remove('listening'));
+      recog.addEventListener('error', () => mic.classList.remove('listening'));
+    } else {
+      mic.disabled = true;
+      mic.title = 'Voice input not supported in this browser';
+    }
+  </script>
+</body>
+</html>
