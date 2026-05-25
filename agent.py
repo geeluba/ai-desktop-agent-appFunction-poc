@@ -54,6 +54,15 @@ FUNCTIONS: dict[str, dict[str, Any]] = {
         "required_args": ["projectorAName", "projectorBName", "videoFileName"],
         "optional_args": {},
     },
+    "playVideo": {
+        "description": (
+            "Switch to a different video on already-paired projectors. Skips "
+            "the BLE/calibration handshake — much faster than pairAndPlayVideo "
+            "for changing videos mid-session. Requires an active session."
+        ),
+        "required_args": ["videoFileName"],
+        "optional_args": {},
+    },
     "startCalibration": {
         "description": (
             "Show the ArUco calibration pattern on the projectors in "
@@ -107,8 +116,17 @@ them), emit "" (empty string) for projectorAName and projectorBName. Do NOT
 reuse the video file name, the user's name, or any other word as a projector
 name. Only fill these fields if the user explicitly names projectors.
 
-Function semantics — read carefully. Two of them are "stop":
-  • pairAndPlayVideo  — pair projectors and PLAY a VIDEO FILE.
+Function semantics — read carefully. Two of them are "play" and two are "stop":
+  • pairAndPlayVideo  — pair projectors AND play a video. Use ONLY when the
+                        user explicitly mentions "pair" / "pairing", OR names
+                        specific projectors (e.g. "pro-a and pro-b"). This
+                        does BLE discovery + connect + calibration link
+                        before playing — slow but necessary if no session.
+  • playVideo         — play a video on ALREADY-paired projectors. Default
+                        for any "play X" / "switch to X" / "change to X"
+                        / "show me X" request that does NOT mention pairing
+                        or specific projector names. Much faster (skips
+                        BLE + calibration handshake).
   • startCalibration  — DISPLAY / SHOW the calibration pattern. Use for any
                         request that mentions "show", "display", or "start"
                         the calibration / pattern.
@@ -121,12 +139,24 @@ Function semantics — read carefully. Two of them are "stop":
                         "finish blending", "end the session", "disconnect
                         the projectors", "break the link between projectors".
 
-Disambiguation: if in doubt between enterStandby and stopBlending, pick
-enterStandby — stopping playback is more common than fully tearing down
-the session.
+Disambiguation rules:
+- pairAndPlayVideo whenever the prompt mentions "pair" / "pairing" OR contains
+  ANY identifier-looking projector name (e.g. "pro-a", "proj-1",
+  "Optoma_ML1080-AAAC0002", anything with dashes/digits/underscores that
+  isn't obviously the video file name). Copy those names verbatim.
+- playVideo for "play X" / "switch to X" / "change video to X" when the
+  prompt does NOT mention pairing and does NOT contain identifier-looking
+  projector names. Phrases like "both projectors" or "my projectors"
+  alone don't count as names.
+- In doubt between pairAndPlayVideo and playVideo → pairAndPlayVideo
+  (better to attempt the pair than to fail with "no session" when names
+  were actually provided).
+- In doubt between enterStandby and stopBlending → enterStandby (stopping
+  playback is more common than fully tearing down).
 
 Functions:
 - pairAndPlayVideo(projectorAName, projectorBName, videoFileName)
+- playVideo(videoFileName)
 - startCalibration(orientation, projectorAName?, projectorBName?)  # orientation: "landscape" or "portrait"
 - enterStandby()
 - stopBlending()
@@ -141,8 +171,23 @@ User: "Pair pro-a and pro-b and play aaa.mp4"
 User: "Pair the two projectors and play video apink"
 {"name":"pairAndPlayVideo","args":{"projectorAName":"","projectorBName":"","videoFileName":"apink"}}
 
+User: "Playing apink on Optoma_ML1080-AAAC0002 + Optoma_ML1080-2AAB0077"
+{"name":"pairAndPlayVideo","args":{"projectorAName":"Optoma_ML1080-AAAC0002","projectorBName":"Optoma_ML1080-2AAB0077","videoFileName":"apink"}}
+
+User: "Play sunset.mp4 on Optoma_ML1080-AAAC0002 and Optoma_ML1080-2AAB0077"
+{"name":"pairAndPlayVideo","args":{"projectorAName":"Optoma_ML1080-AAAC0002","projectorBName":"Optoma_ML1080-2AAB0077","videoFileName":"sunset.mp4"}}
+
+User: "Play sunset.mp4"
+{"name":"playVideo","args":{"videoFileName":"sunset.mp4"}}
+
+User: "Switch to apink"
+{"name":"playVideo","args":{"videoFileName":"apink"}}
+
+User: "Change the video to mountain.mp4"
+{"name":"playVideo","args":{"videoFileName":"mountain.mp4"}}
+
 User: "Play sunset.mp4 on both projectors"
-{"name":"pairAndPlayVideo","args":{"projectorAName":"","projectorBName":"","videoFileName":"sunset.mp4"}}
+{"name":"playVideo","args":{"videoFileName":"sunset.mp4"}}
 
 User: "Show the landscape calibration pattern"
 {"name":"startCalibration","args":{"orientation":"landscape"}}
