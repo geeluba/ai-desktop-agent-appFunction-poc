@@ -17,7 +17,9 @@ import threading
 import webbrowser
 from pathlib import Path
 
-from flask import Flask, jsonify, request, send_from_directory
+import json
+
+from flask import Flask, Response, jsonify, request, send_from_directory
 
 # Make agent.py importable when launched as `python web/app.py`
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -45,6 +47,7 @@ def index() -> object:
 
 @app.post("/invoke")
 def invoke() -> object:
+    """Stream events as NDJSON so the client can render logs live."""
     payload = request.get_json(force=True) or {}
     text = (payload.get("text") or "").strip()
     if not text:
@@ -53,13 +56,21 @@ def invoke() -> object:
         intent = _parser().parse(text)
     except ValueError as e:
         return jsonify(error=f"intent classification failed: {e}"), 400
-    result = _invoker.invoke(intent)
-    return jsonify(
-        intent={"name": intent.name, "args": intent.args},
-        ok=result.ok,
-        summary=result.summary,
-        stdout=result.raw_stdout,
-        stderr=result.raw_stderr,
+
+    def stream_events():
+        yield json.dumps({
+            "type": "intent",
+            "intent": {"name": intent.name, "args": intent.args},
+        }) + "\n"
+        for event in _invoker.stream(intent):
+            yield json.dumps(event) + "\n"
+
+    return Response(
+        stream_events(),
+        mimetype="application/x-ndjson",
+        # X-Accel-Buffering helps if the user ever puts nginx in front; harmless
+        # otherwise. Cache-Control prevents intermediaries from coalescing chunks.
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 

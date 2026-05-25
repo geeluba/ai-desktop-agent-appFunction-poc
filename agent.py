@@ -22,10 +22,15 @@ from __future__ import annotations
 
 import json
 import os
+import queue
+import re
 import shlex
 import subprocess
 import sys
-from dataclasses import dataclass
+import threading
+import time
+from collections.abc import Iterator
+from dataclasses import dataclass, field
 from typing import Any
 
 import ollama
@@ -180,6 +185,7 @@ class InvocationResult:
     summary: str
     raw_stdout: str
     raw_stderr: str
+    logs: list[str] = field(default_factory=list)
 
 
 class IntentParser:
@@ -247,10 +253,49 @@ def _extract_first_json_object(text: str) -> dict[str, Any] | None:
 class BlendingInvoker:
     """Calls the blending app's AppFunctions via `adb shell cmd app_function`."""
 
+    # Match any of the blending-app tags so the UI surfaces lifecycle + BLE
+    # + AppFunction handler logs but stays free of unrelated system noise.
+    LOG_TAG_PATTERN = re.compile(r"\bProjector:[A-Za-z]+\b")
+    # Strip the `MM-DD HH:MM:SS.mmm PID TID LEVEL TAG: ` prefix from each
+    # threadtime-formatted line down to `HH:MM:SS LEVEL TAG: message` so the
+    # UI doesn't get a wall of timestamps.
+    LOG_PREFIX_RE = re.compile(
+        r"^\d{2}-\d{2}\s+(\d{2}:\d{2}:\d{2})\.\d+\s+\d+\s+\d+\s+([VDIWEF])\s+(\S+):\s*(.*)$"
+    )
+    # Let the projector finish flushing its post-response log lines before we
+    # snapshot logcat (e.g. the `OperationResult` line emitted right after the
+    # AppFunctions framework serializes the response).
+    LOG_FLUSH_DELAY = 0.5
+
     def __init__(self, adb_path: str = "adb"):
         self.adb_path = adb_path
 
     def invoke(self, intent: ParsedIntent) -> InvocationResult:
+        """Synchronous convenience wrapper around `stream()` for the REPL."""
+        logs: list[str] = []
+        final: dict[str, Any] | None = None
+        for event in self.stream(intent):
+            kind = event.get("type")
+            if kind == "log":
+                logs.append(event["line"])
+            elif kind == "result":
+                final = event
+        assert final is not None, "stream() must end with a result event"
+        return InvocationResult(
+            ok=final["ok"],
+            summary=final["summary"],
+            raw_stdout=final["stdout"],
+            raw_stderr=final["stderr"],
+            logs=logs,
+        )
+
+    def stream(self, intent: ParsedIntent) -> Iterator[dict[str, Any]]:
+        """Yields events for one invocation, in order:
+            {"type": "log",    "line": "<filtered logcat line>"}   (zero or more)
+            {"type": "result", "ok": bool, "summary": str, ...}    (always, last)
+        Log events are interleaved with the running AppFunction call so the
+        web UI can render progress as it happens, not only after completion.
+        """
         function_id = f"{TARGET_CLASS}#{intent.name}"
         # Fill in any optional args the LLM omitted, so the framework's
         # "every declared parameter must be present" rule is satisfied.
@@ -258,10 +303,8 @@ class BlendingInvoker:
         for key, default in FUNCTIONS[intent.name].get("optional_args", {}).items():
             args.setdefault(key, default)
         parameters = json.dumps(args)
-        # `adb shell` concatenates argv after "shell" and pipes it to
-        # /system/bin/sh on the device, which re-tokenizes — so the JSON's
-        # embedded `"` characters get stripped. Quote each token through
-        # shlex so the device shell sees the JSON as a single argument.
+        # `adb shell` re-tokenizes its argv on /system/bin/sh, eating bare
+        # JSON quotes. shlex.quote each token so the JSON survives as one arg.
         device_cmd = " ".join(
             [
                 "cmd",
@@ -275,18 +318,109 @@ class BlendingInvoker:
                 shlex.quote(parameters),
             ]
         )
-        result = subprocess.run(
-            [self.adb_path, "shell", device_cmd],
-            capture_output=True,
+
+        log_proc = subprocess.Popen(
+            [self.adb_path, "logcat", "-T", "1", "-v", "threadtime"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             text=True,
-            timeout=30,
+            bufsize=1,  # line-buffered so each logcat line shows up promptly
         )
-        return InvocationResult(
-            ok=result.returncode == 0 and "Error executing" not in result.stdout,
-            summary=_summarize_response(result.stdout),
-            raw_stdout=result.stdout,
-            raw_stderr=result.stderr,
-        )
+        log_queue: queue.Queue[str] = queue.Queue()
+        reader_stop = threading.Event()
+
+        def read_loop() -> None:
+            assert log_proc.stdout is not None
+            try:
+                for raw in iter(log_proc.stdout.readline, ""):
+                    if reader_stop.is_set():
+                        break
+                    formatted = self._format_log_line(raw.rstrip())
+                    if formatted is not None:
+                        log_queue.put(formatted)
+            except (ValueError, OSError):
+                pass  # pipe closed during shutdown
+
+        reader_thread = threading.Thread(target=read_loop, daemon=True)
+        reader_thread.start()
+
+        invoke_box: dict[str, Any] = {}
+
+        def run_invoke() -> None:
+            try:
+                r = subprocess.run(
+                    [self.adb_path, "shell", device_cmd],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+                invoke_box.update(
+                    stdout=r.stdout, stderr=r.stderr, returncode=r.returncode
+                )
+            except subprocess.TimeoutExpired:
+                invoke_box.update(
+                    stdout="", stderr="invocation timed out after 30s", returncode=-1
+                )
+
+        invoke_thread = threading.Thread(target=run_invoke, daemon=True)
+        invoke_thread.start()
+
+        try:
+            # Interleave: drain queue until invocation finishes
+            while invoke_thread.is_alive():
+                try:
+                    yield {"type": "log", "line": log_queue.get(timeout=0.1)}
+                except queue.Empty:
+                    pass
+            invoke_thread.join()
+
+            # Late-flush window: projector emits a final log line right after
+            # the AppFunctions framework serializes the response back.
+            flush_deadline = time.monotonic() + self.LOG_FLUSH_DELAY
+            while time.monotonic() < flush_deadline:
+                try:
+                    yield {"type": "log", "line": log_queue.get(timeout=0.1)}
+                except queue.Empty:
+                    pass
+
+            reader_stop.set()
+            log_proc.terminate()
+            try:
+                log_proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                log_proc.kill()
+            while True:
+                try:
+                    yield {"type": "log", "line": log_queue.get_nowait()}
+                except queue.Empty:
+                    break
+        finally:
+            reader_stop.set()
+            if log_proc.poll() is None:
+                log_proc.terminate()
+                try:
+                    log_proc.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    log_proc.kill()
+
+        stdout = invoke_box.get("stdout", "")
+        rc = invoke_box.get("returncode", -1)
+        yield {
+            "type": "result",
+            "ok": rc == 0 and "Error executing" not in stdout,
+            "summary": _summarize_response(stdout),
+            "stdout": stdout,
+            "stderr": invoke_box.get("stderr", ""),
+        }
+
+    def _format_log_line(self, line: str) -> str | None:
+        if not self.LOG_TAG_PATTERN.search(line):
+            return None
+        m = self.LOG_PREFIX_RE.match(line)
+        if m:
+            hms, level, tag, msg = m.groups()
+            return f"{hms} {level} {tag}: {msg}"
+        return line
 
 
 def _summarize_response(stdout: str) -> str:
@@ -330,6 +464,8 @@ def repl() -> None:
         result = invoker.invoke(intent)
         prefix = "ok" if result.ok else "fail"
         print(f"{prefix}: {result.summary}")
+        for line in result.logs:
+            print(f"  | {line}")
 
 
 if __name__ == "__main__":

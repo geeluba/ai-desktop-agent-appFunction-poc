@@ -28,14 +28,138 @@
       background: var(--bg);
       color: var(--fg);
       overflow: hidden;
+      display: flex;
+    }
+    .chat-wrap {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      justify-content: center;
     }
     .app {
+      width: 100%;
       max-width: 760px;
-      margin: 0 auto;
       height: 100vh;
       display: flex;
       flex-direction: column;
       padding: 0 16px;
+    }
+
+    /* Right-side mobile log panel */
+    .log-panel {
+      width: 400px;
+      flex-shrink: 0;
+      height: 100vh;
+      border-left: 1px solid var(--card);
+      background: #0a0d12;
+      display: flex;
+      flex-direction: column;
+      transition: width 0.2s, border-left-color 0.2s;
+      position: relative;
+    }
+    .log-panel.collapsed { width: 0; border-left-color: transparent; overflow: hidden; }
+    /* Drag handle, sitting on the panel's left edge */
+    .resize-handle {
+      position: absolute;
+      left: -3px;
+      top: 0;
+      bottom: 0;
+      width: 6px;
+      cursor: col-resize;
+      background: transparent;
+      transition: background 0.12s;
+      z-index: 5;
+    }
+    .resize-handle:hover, .resize-handle.dragging { background: var(--accent); }
+    .log-panel.collapsed .resize-handle { display: none; }
+    /* While dragging, lock the cursor + suppress transitions for snappy feel. */
+    body.resizing { cursor: col-resize !important; user-select: none; }
+    body.resizing .log-panel { transition: none; }
+    body.resizing * { cursor: col-resize !important; }
+    .log-panel-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 14px;
+      border-bottom: 1px solid var(--card);
+    }
+    .log-panel-header h2 {
+      font-size: 13px;
+      margin: 0;
+      flex: 1;
+      color: var(--fg);
+      font-weight: 600;
+    }
+    .log-panel-header .icon-btn { width: 26px; height: 26px; font-size: 13px; }
+    .log-stream {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px 0;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 11px;
+      line-height: 1.55;
+    }
+    .log-stream::-webkit-scrollbar { width: 8px; }
+    .log-stream::-webkit-scrollbar-thumb { background: var(--card-2); border-radius: 4px; }
+    .log-empty {
+      color: var(--muted);
+      text-align: center;
+      padding: 24px 16px;
+      font-family: -apple-system, sans-serif;
+      font-size: 12px;
+    }
+    .log-section { padding: 4px 0; }
+    .log-section + .log-section { border-top: 1px dashed var(--card); margin-top: 4px; }
+    .log-section-head {
+      padding: 6px 14px 4px;
+      color: var(--muted);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-family: -apple-system, sans-serif;
+    }
+    .log-section-head .name {
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      text-transform: none;
+      letter-spacing: 0;
+      color: var(--fg);
+      font-size: 11px;
+    }
+    .log-section-head .status {
+      margin-left: auto;
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 8px;
+    }
+    .log-section-head .status.running {
+      color: var(--accent);
+      background: rgba(47, 129, 247, 0.12);
+    }
+    .log-section-head .status.ok { color: var(--ok); background: rgba(45, 164, 78, 0.12); }
+    .log-section-head .status.err { color: var(--err); background: rgba(248, 81, 73, 0.12); }
+    .log-line {
+      padding: 1px 14px;
+      color: #c9d1d9;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .log-line.w { color: #d29922; }
+    .log-line.e, .log-line.f { color: #ff7b72; }
+    .log-line.d, .log-line.v { color: var(--muted); }
+    .log-line .lvl {
+      display: inline-block;
+      width: 10px;
+      color: var(--muted);
+      margin-right: 4px;
+    }
+
+    /* On smaller viewports the panel takes over too much room — auto-hide. */
+    @media (max-width: 1100px) {
+      .log-panel { width: 0; border-left-color: transparent; overflow: hidden; }
+      .log-panel.force-open { width: 360px; border-left-color: var(--card); }
     }
     header {
       display: flex;
@@ -311,6 +435,7 @@
   </style>
 </head>
 <body>
+  <div class="chat-wrap">
   <div class="app">
     <header>
       <div class="avatar">P</div>
@@ -318,6 +443,7 @@
         <h1>Projector Agent</h1>
         <div class="status">Connected · Ollama → ADB → AppFunctions</div>
       </div>
+      <button type="button" id="panel-toggle" class="icon-btn" title="Toggle mobile log panel">📋</button>
     </header>
 
     <div id="log" class="log">
@@ -344,6 +470,17 @@
       </form>
     </div>
   </div>
+  </div>
+  <aside class="log-panel" id="log-panel">
+    <div class="resize-handle" id="resize-handle" title="Drag to resize"></div>
+    <div class="log-panel-header">
+      <h2>Mobile logs</h2>
+      <button type="button" class="icon-btn" id="log-clear" title="Clear all logs">🗑</button>
+    </div>
+    <div class="log-stream" id="log-stream">
+      <div class="log-empty">Mobile logs from each invocation will stream here.</div>
+    </div>
+  </aside>
 
   <script>
     const log = document.getElementById('log');
@@ -352,8 +489,128 @@
     const send = document.getElementById('send');
     const mic = document.getElementById('mic');
     const chips = document.getElementById('chips');
+    const logPanel = document.getElementById('log-panel');
+    const logStream = document.getElementById('log-stream');
+    const logClear = document.getElementById('log-clear');
+    const panelToggle = document.getElementById('panel-toggle');
+    const resizeHandle = document.getElementById('resize-handle');
+
+    /* ---- Log panel resize ----------------------------------------- */
+    const PANEL_MIN = 280;
+    const PANEL_MAX_RATIO = 0.7; // never let panel eat more than 70% of viewport
+    const PANEL_STORAGE_KEY = 'logPanelWidth';
+
+    function applyPanelWidth(w) {
+      const max = Math.floor(window.innerWidth * PANEL_MAX_RATIO);
+      const clamped = Math.max(PANEL_MIN, Math.min(max, w));
+      logPanel.style.width = clamped + 'px';
+      return clamped;
+    }
+    const savedWidth = parseInt(localStorage.getItem(PANEL_STORAGE_KEY) || '0', 10);
+    if (savedWidth) applyPanelWidth(savedWidth);
+
+    resizeHandle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startW = logPanel.getBoundingClientRect().width;
+      document.body.classList.add('resizing');
+      resizeHandle.classList.add('dragging');
+      function onMove(ev) {
+        // Handle lives on panel's LEFT edge, so dragging right shrinks the panel.
+        const next = startW - (ev.clientX - startX);
+        applyPanelWidth(next);
+      }
+      function onUp() {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        document.body.classList.remove('resizing');
+        resizeHandle.classList.remove('dragging');
+        const current = Math.round(logPanel.getBoundingClientRect().width);
+        localStorage.setItem(PANEL_STORAGE_KEY, String(current));
+      }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+    // Double-click the handle to reset to the default width.
+    resizeHandle.addEventListener('dblclick', () => {
+      logPanel.style.width = '';
+      localStorage.removeItem(PANEL_STORAGE_KEY);
+    });
+    // Re-clamp on viewport resize so the panel can't exceed PANEL_MAX_RATIO.
+    window.addEventListener('resize', () => {
+      const current = logPanel.getBoundingClientRect().width;
+      if (current > 0) applyPanelWidth(current);
+    });
 
     let lastSender = null;
+
+    /* ---- Mobile log panel (right sidebar) -------------------------- */
+
+    function openLogSection(intentName) {
+      // Wipe prior invocation's logs so the panel only ever shows the current
+      // request — keeps the trace focused and avoids unbounded scrollback.
+      logStream.innerHTML = '';
+      const section = document.createElement('div');
+      section.className = 'log-section';
+      const head = document.createElement('div');
+      head.className = 'log-section-head';
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = intentName || '…';
+      const status = document.createElement('span');
+      status.className = 'status running';
+      status.textContent = 'running';
+      head.appendChild(name);
+      head.appendChild(status);
+      section.appendChild(head);
+      logStream.appendChild(section);
+      logStream.scrollTop = logStream.scrollHeight;
+      let count = 0;
+      return {
+        setName(n) { name.textContent = n; },
+        addLine(line) {
+          count++;
+          const el = document.createElement('div');
+          el.className = 'log-line';
+          // Pull "LEVEL" out of the formatted line ("HH:MM:SS L Tag: msg") to
+          // colour-code by severity. Falls back to plain rendering otherwise.
+          const m = line.match(/^(\d{2}:\d{2}:\d{2})\s+([VDIWEF])\s+(.*)$/);
+          if (m) {
+            el.classList.add(m[2].toLowerCase());
+            el.innerHTML = `<span class="lvl">${m[2]}</span>${escapeHtml(m[1])} ${escapeHtml(m[3])}`;
+          } else {
+            el.textContent = line;
+          }
+          section.appendChild(el);
+          logStream.scrollTop = logStream.scrollHeight;
+        },
+        finalize(ok) {
+          status.className = `status ${ok ? 'ok' : 'err'}`;
+          status.textContent = ok ? `ok · ${count} lines` : `failed · ${count} lines`;
+        },
+        markError() {
+          status.className = 'status err';
+          status.textContent = 'error';
+        },
+      };
+    }
+
+    logClear.addEventListener('click', () => {
+      logStream.innerHTML = '';
+      const empty = document.createElement('div');
+      empty.className = 'log-empty';
+      empty.textContent = 'Mobile logs from each invocation will stream here.';
+      logStream.appendChild(empty);
+    });
+    panelToggle.addEventListener('click', () => {
+      // On wide viewports the panel is open by default — clicking collapses it.
+      // On narrow viewports it's hidden by default — clicking forces it open.
+      if (window.innerWidth <= 1100) {
+        logPanel.classList.toggle('force-open');
+      } else {
+        logPanel.classList.toggle('collapsed');
+      }
+    });
 
     function fmtTime(d = new Date()) {
       return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -379,10 +636,11 @@
       scrollDown();
     }
 
-    function addAgentBubble(contentNode) {
+    function createStreamingAgentBubble() {
       const grouped = lastSender === 'agent';
       const row = document.createElement('div');
       row.className = `row agent${grouped ? ' grouped' : ''}`;
+
       const avatar = document.createElement('div');
       avatar.className = 'row-avatar agent';
       avatar.textContent = '🤖';
@@ -390,10 +648,25 @@
       wrap.className = 'stack';
       const bubble = document.createElement('div');
       bubble.className = 'bubble';
-      bubble.appendChild(contentNode);
+
+      const intentEl = document.createElement('div');
+      intentEl.className = 'intent-tag';
+      intentEl.innerHTML = '<span class="dot"></span>thinking…';
+
+      const summaryEl = document.createElement('div');
+      summaryEl.className = 'summary';
+      const typing = document.createElement('div');
+      typing.className = 'typing';
+      typing.innerHTML = '<span></span><span></span><span></span>';
+      summaryEl.appendChild(typing);
+
+      bubble.appendChild(intentEl);
+      bubble.appendChild(summaryEl);
+
       const ts = document.createElement('div');
       ts.className = 'ts';
       ts.textContent = fmtTime();
+
       wrap.appendChild(bubble);
       wrap.appendChild(ts);
       row.appendChild(avatar);
@@ -401,43 +674,38 @@
       log.appendChild(row);
       lastSender = 'agent';
       scrollDown();
-      return { row, bubble };
-    }
 
-    function addTyping() {
-      const node = document.createElement('div');
-      node.className = 'typing';
-      node.innerHTML = '<span></span><span></span><span></span>';
-      const { row } = addAgentBubble(node);
-      // typing indicators shouldn't anchor "grouping" — reset so the real
-      // reply still gets its own avatar if needed.
-      lastSender = null;
-      return row;
-    }
+      // Each invocation gets its own section in the right-side log panel.
+      const section = openLogSection('thinking…');
+      let finalized = false;
 
-    function buildAgentReply({ intent, ok, summary, error }) {
-      const frag = document.createDocumentFragment();
-      if (error) {
-        const tag = document.createElement('div');
-        tag.className = 'intent-tag err';
-        tag.innerHTML = '<span class="dot"></span>intent error';
-        frag.appendChild(tag);
-        const body = document.createElement('div');
-        body.className = 'summary err';
-        body.textContent = error;
-        frag.appendChild(body);
-        return frag;
-      }
-      const tag = document.createElement('div');
-      tag.className = `intent-tag ${ok ? 'ok' : 'err'}`;
-      tag.innerHTML = `<span class="dot"></span>${intent.name}`;
-      tag.title = JSON.stringify(intent.args, null, 2);
-      frag.appendChild(tag);
-      const body = document.createElement('div');
-      body.className = `summary${ok ? '' : ' err'}`;
-      body.textContent = summary;
-      frag.appendChild(body);
-      return frag;
+      return {
+        handle(ev) {
+          if (ev.type === 'intent') {
+            intentEl.innerHTML = `<span class="dot"></span>${ev.intent.name}`;
+            intentEl.title = JSON.stringify(ev.intent.args, null, 2);
+            section.setName(ev.intent.name);
+          } else if (ev.type === 'log') {
+            section.addLine(ev.line);
+          } else if (ev.type === 'result') {
+            finalized = true;
+            typing.remove();
+            summaryEl.textContent = ev.summary;
+            if (!ev.ok) summaryEl.classList.add('err');
+            intentEl.classList.add(ev.ok ? 'ok' : 'err');
+            section.finalize(ev.ok);
+          }
+        },
+        error(msg) {
+          if (finalized) return;
+          typing.remove();
+          intentEl.className = 'intent-tag err';
+          intentEl.innerHTML = '<span class="dot"></span>error';
+          summaryEl.classList.add('err');
+          summaryEl.textContent = msg;
+          section.markError();
+        },
+      };
     }
 
     function escapeHtml(s) {
@@ -470,24 +738,41 @@
 
     async function sendMessage(text) {
       addUserBubble(text);
-      const typingRow = addTyping();
       send.disabled = true;
+      const slot = createStreamingAgentBubble();
       try {
         const resp = await fetch('/invoke', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text }),
         });
-        const data = await resp.json();
-        typingRow.remove();
         if (!resp.ok) {
-          addAgentBubble(buildAgentReply({ error: data.error || `HTTP ${resp.status}` }));
-        } else {
-          addAgentBubble(buildAgentReply(data));
+          const data = await resp.json().catch(() => ({}));
+          slot.error(data.error || `HTTP ${resp.status}`);
+          return;
+        }
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          // Process every complete line and keep any partial tail in `buf`.
+          let idx;
+          while ((idx = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, idx).trim();
+            buf = buf.slice(idx + 1);
+            if (!line) continue;
+            try { slot.handle(JSON.parse(line)); }
+            catch (e) { console.error('bad event', line, e); }
+          }
+        }
+        if (buf.trim()) {
+          try { slot.handle(JSON.parse(buf)); } catch (e) {}
         }
       } catch (err) {
-        typingRow.remove();
-        addAgentBubble(buildAgentReply({ error: String(err) }));
+        slot.error(String(err));
       } finally {
         send.disabled = false;
         input.focus();
