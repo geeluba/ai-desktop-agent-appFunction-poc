@@ -11,13 +11,13 @@ Run:
 
 from __future__ import annotations
 
+import json
 import os
+import subprocess
 import sys
 import threading
 import webbrowser
 from pathlib import Path
-
-import json
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
@@ -43,6 +43,34 @@ _invoker = BlendingInvoker()
 @app.get("/")
 def index() -> object:
     return send_from_directory(app.static_folder, "index.html")  # type: ignore[arg-type]
+
+
+@app.get("/adb_status")
+def adb_status() -> object:
+    """Quick poll endpoint: is any ADB device currently attached?
+
+    Parses `adb devices` and returns {connected, devices[]}. Frontend polls
+    this every few seconds to colour the header status dot.
+    """
+    try:
+        r = subprocess.run(
+            ["adb", "devices"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+        return jsonify(connected=False, devices=[], error=str(e))
+    # Output:
+    #   List of devices attached
+    #   <serial>\tdevice
+    #   <serial>\tunauthorized   (excluded — needs user to accept prompt)
+    devices = []
+    for line in r.stdout.splitlines()[1:]:
+        parts = line.split()
+        if len(parts) >= 2 and parts[1] == "device":
+            devices.append(parts[0])
+    return jsonify(connected=bool(devices), devices=devices)
 
 
 @app.post("/invoke")

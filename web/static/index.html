@@ -194,8 +194,17 @@
       width: 7px;
       height: 7px;
       border-radius: 50%;
+      background: var(--muted);
+      box-shadow: 0 0 6px var(--muted);
+      transition: background 0.2s, box-shadow 0.2s;
+    }
+    .status.connected::before {
       background: var(--ok);
       box-shadow: 0 0 6px var(--ok);
+    }
+    .status.disconnected::before {
+      background: var(--err);
+      box-shadow: 0 0 6px var(--err);
     }
 
     /* Scroll area */
@@ -441,7 +450,7 @@
       <div class="avatar">P</div>
       <div class="header-text">
         <h1>Projector Agent</h1>
-        <div class="status">Connected · Ollama → ADB → AppFunctions</div>
+        <div class="status" id="status">Checking ADB…</div>
       </div>
       <button type="button" id="panel-toggle" class="icon-btn" title="Toggle mobile log panel">📋</button>
     </header>
@@ -495,6 +504,32 @@
     const logClear = document.getElementById('log-clear');
     const panelToggle = document.getElementById('panel-toggle');
     const resizeHandle = document.getElementById('resize-handle');
+    const statusEl = document.getElementById('status');
+
+    /* ---- ADB device status poll ----------------------------------- */
+    async function refreshAdbStatus() {
+      try {
+        const r = await fetch('/adb_status', { cache: 'no-store' });
+        const data = await r.json();
+        if (data.connected) {
+          statusEl.classList.remove('disconnected');
+          statusEl.classList.add('connected');
+          const dev = data.devices[0] + (data.devices.length > 1
+            ? ` (+${data.devices.length - 1})` : '');
+          statusEl.textContent = `Connected · ${dev}`;
+        } else {
+          statusEl.classList.remove('connected');
+          statusEl.classList.add('disconnected');
+          statusEl.textContent = 'No ADB device · check USB connection';
+        }
+      } catch (err) {
+        statusEl.classList.remove('connected');
+        statusEl.classList.add('disconnected');
+        statusEl.textContent = 'ADB status unavailable';
+      }
+    }
+    refreshAdbStatus();
+    setInterval(refreshAdbStatus, 4000);
 
     /* ---- Log panel resize ----------------------------------------- */
     const PANEL_MIN = 280;
