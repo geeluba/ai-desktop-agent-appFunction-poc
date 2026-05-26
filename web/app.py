@@ -45,6 +45,12 @@ def index() -> object:
     return send_from_directory(app.static_folder, "index.html")  # type: ignore[arg-type]
 
 
+@app.get("/model")
+def model_info() -> object:
+    """Return the LLM model the intent parser is configured to use."""
+    return jsonify(model=_parser().model)
+
+
 @app.get("/adb_status")
 def adb_status() -> object:
     """Quick poll endpoint: is any ADB device currently attached?

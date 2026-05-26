@@ -181,6 +181,19 @@
     }
     .header-text { flex: 1; min-width: 0; }
     h1 { font-size: 22px; margin: 0; font-weight: 600; }
+    .model-tag {
+      font-size: 14px;
+      font-weight: 400;
+      color: var(--muted);
+      background: var(--card);
+      border: 1px solid var(--card-2);
+      padding: 2px 8px;
+      border-radius: 6px;
+      margin-left: 8px;
+      vertical-align: middle;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+    }
+    .model-tag:empty { display: none; }
     .status {
       font-size: 18px;
       color: var(--muted);
@@ -449,7 +462,7 @@
     <header>
       <div class="avatar">P</div>
       <div class="header-text">
-        <h1>Projector Agent</h1>
+        <h1>Projector Agent<span class="model-tag" id="model-name"></span></h1>
         <div class="status" id="status">Checking ADB…</div>
       </div>
       <button type="button" id="panel-toggle" class="icon-btn" title="Toggle mobile log panel">📋</button>
@@ -530,6 +543,15 @@
     }
     refreshAdbStatus();
     setInterval(refreshAdbStatus, 4000);
+
+    /* ---- Fetch the LLM model name once on load -------------------- */
+    fetch('/model', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => {
+        const el = document.getElementById('model-name');
+        if (d && d.model) el.textContent = d.model;
+      })
+      .catch(() => { /* leave the pill empty if it fails */ });
 
     /* ---- Log panel resize ----------------------------------------- */
     const PANEL_MIN = 280;
