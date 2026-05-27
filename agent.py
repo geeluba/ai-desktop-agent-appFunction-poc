@@ -63,6 +63,15 @@ FUNCTIONS: dict[str, dict[str, Any]] = {
         "required_args": ["videoFileName"],
         "optional_args": {},
     },
+    "setLooping": {
+        "description": (
+            "Turn video looping on or off on the currently-playing video. "
+            "enabled=true loops the video; enabled=false plays it once. "
+            "Requires an active session in VIDEO mode."
+        ),
+        "required_args": ["enabled"],
+        "optional_args": {},
+    },
     "startCalibration": {
         "description": (
             "Show the ArUco calibration pattern on the projectors in "
@@ -127,17 +136,32 @@ Function semantics — read carefully. Two of them are "play" and two are "stop"
                         / "show me X" request that does NOT mention pairing
                         or specific projector names. Much faster (skips
                         BLE + calibration handshake).
+  • setLooping        — turn LOOPING on or off on the currently-playing
+                        video. Boolean `enabled` arg: true for any "loop",
+                        "repeat", "play on repeat", "keep looping",
+                        "play it again and again" wording. false for
+                        "stop looping", "play once", "don't repeat",
+                        "play it just once", "no more loops". Does NOT
+                        upload or start a video — only toggles the loop
+                        flag on what's already playing.
   • startCalibration  — DISPLAY / SHOW the calibration pattern. Use for any
                         request that mentions "show", "display", or "start"
                         the calibration / pattern.
   • enterStandby      — SOFT STOP. Stop current playback / calibration but
-                        keep the projectors paired. Use for: "stop the
-                        video", "pause", "halt the show", "standby please",
+                        keep the projectors paired. Use ONLY for PLAYBACK-
+                        level phrases that target the current content, not
+                        the session: "stop the video", "pause", "pause the
+                        playback", "halt the show", "standby please",
                         "cancel the calibration", "exit playback".
-  • stopBlending      — HARD STOP. End the whole session and DISCONNECT
-                        the projectors. Use ONLY for: "stop blending",
-                        "finish blending", "end the session", "disconnect
-                        the projectors", "break the link between projectors".
+  • stopBlending      — HARD STOP. End the WHOLE session, disconnect the
+                        projectors, return them to NONE mode (unlinked).
+                        After this, a fresh BLE pair is required. Use for
+                        ANY phrase that targets the SESSION as a whole:
+                        "stop the session", "exit the session", "leave the
+                        session", "close the session", "finish the session",
+                        "end the session", "stop blending", "finish
+                        blending", "disconnect the projectors", "break the
+                        link between the projectors", "tear it all down".
 
 Disambiguation rules:
 - pairAndPlayVideo whenever the prompt mentions "pair" / "pairing" OR contains
@@ -151,12 +175,16 @@ Disambiguation rules:
 - In doubt between pairAndPlayVideo and playVideo → pairAndPlayVideo
   (better to attempt the pair than to fail with "no session" when names
   were actually provided).
-- In doubt between enterStandby and stopBlending → enterStandby (stopping
-  playback is more common than fully tearing down).
+- enterStandby vs stopBlending: look at what the user is targeting.
+  Targeting the CURRENT CONTENT ("the video", "the playback", "the
+  show", "the calibration", "playback") → enterStandby. Targeting the
+  SESSION itself (any phrase containing the word "session", plus
+  "blending", "disconnect", "break the link", "tear down") → stopBlending.
 
 Functions:
 - pairAndPlayVideo(projectorAName, projectorBName, videoFileName)
 - playVideo(videoFileName)
+- setLooping(enabled)  # enabled: true or false (JSON boolean, not a string)
 - startCalibration(orientation, projectorAName?, projectorBName?)  # orientation: "landscape" or "portrait"
 - enterStandby()
 - stopBlending()
@@ -189,6 +217,24 @@ User: "Change the video to mountain.mp4"
 User: "Play sunset.mp4 on both projectors"
 {"name":"playVideo","args":{"videoFileName":"sunset.mp4"}}
 
+User: "Loop the video"
+{"name":"setLooping","args":{"enabled":true}}
+
+User: "Play it on repeat"
+{"name":"setLooping","args":{"enabled":true}}
+
+User: "Keep looping"
+{"name":"setLooping","args":{"enabled":true}}
+
+User: "Stop looping"
+{"name":"setLooping","args":{"enabled":false}}
+
+User: "Play once"
+{"name":"setLooping","args":{"enabled":false}}
+
+User: "Don't repeat the video"
+{"name":"setLooping","args":{"enabled":false}}
+
 User: "Show the landscape calibration pattern"
 {"name":"startCalibration","args":{"orientation":"landscape"}}
 
@@ -214,6 +260,21 @@ User: "Disconnect the projectors"
 {"name":"stopBlending","args":{}}
 
 User: "Break the link between the projectors"
+{"name":"stopBlending","args":{}}
+
+User: "Exit the session"
+{"name":"stopBlending","args":{}}
+
+User: "Leave the session"
+{"name":"stopBlending","args":{}}
+
+User: "Stop the session"
+{"name":"stopBlending","args":{}}
+
+User: "Close the session"
+{"name":"stopBlending","args":{}}
+
+User: "Finish the session"
 {"name":"stopBlending","args":{}}
 """
 
